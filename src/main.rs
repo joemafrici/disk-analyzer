@@ -1,8 +1,8 @@
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Instant;
 use walkdir::WalkDir;
-
+use std::os::unix::fs::MetadataExt;
 
 const BYTES_PER_GB: f64 = 1024.0 * 1024.0 * 1024.0;
 fn bytes_to_gb(bytes: u64) -> f64 {
@@ -20,7 +20,6 @@ struct DirEntry {
     path: PathBuf,
     size: u64,
     file_count: u64,
-
 }
 fn main() {
     println!("disk-analyzer starting...");
@@ -33,12 +32,15 @@ fn main() {
     for entry in WalkDir::new(root_dir).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
             if let Some(parent) = entry.path().parent() {
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let metadata = entry.metadata().unwrap();
+                let size = metadata.blocks() * 512;
 
-                disk_stats.entry(parent.to_path_buf()).and_modify(|e| {
-                    e.size += size;
-                    e.file_count += 1;
-                })
+                disk_stats
+                    .entry(parent.to_path_buf())
+                    .and_modify(|e| {
+                        e.size += size;
+                        e.file_count += 1;
+                    })
                     .or_insert(DirEntry {
                         path: parent.to_path_buf(),
                         size,
@@ -52,7 +54,12 @@ fn main() {
     disk_stats_vec.sort_by_key(|k| std::cmp::Reverse(k.size));
 
     for entry in disk_stats_vec.iter().take(20) {
-        println!("Directory: {}\tSize: {}\tNum Files: {}", entry.path.display(), bytes_to_gb(entry.size), entry.file_count);
+        println!(
+            "Directory: {}\tSize: {}GB\tNum Files: {}",
+            entry.path.display(),
+            bytes_to_gb(entry.size),
+            entry.file_count
+        );
     }
     let duration = now.elapsed().as_secs_f64();
     let (mins, secs) = seconds_to_min_sec(duration);
